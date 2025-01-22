@@ -8,8 +8,8 @@ from hummingbot.client.config.config_data_types import BaseConnectorConfigMap, C
 from hummingbot.core.data_type.trade_fee import TradeFeeSchema
 
 DEFAULT_FEES = TradeFeeSchema(
-    maker_percent_fee_decimal=Decimal("0.001"),
-    taker_percent_fee_decimal=Decimal("0.001"),
+    maker_percent_fee_decimal=Decimal("0.01"),
+    taker_percent_fee_decimal=Decimal("0.095"),
 )
 
 CENTRALIZED = True
@@ -25,7 +25,7 @@ def is_pair_information_valid(pair_info: Dict[str, Any]) -> bool:
 
     :return: True if the trading pair is enabled, False otherwise
     """
-    return pair_info.get("statusCode") == "Normal"
+    return True
 
 
 def get_ms_timestamp() -> int:

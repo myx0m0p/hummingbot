@@ -1,9 +1,6 @@
 import asyncio
-import copy
-import logging
-import math
 from decimal import Decimal
-from typing import Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 from bidict import bidict
 
@@ -22,12 +19,14 @@ from hummingbot.connector.utils import combine_to_hb_trading_pair, split_hb_trad
 from hummingbot.core.data_type.common import OrderType, TradeType
 from hummingbot.core.data_type.in_flight_order import InFlightOrder, OrderState, OrderUpdate, TradeUpdate
 from hummingbot.core.data_type.order_book_tracker_data_source import OrderBookTrackerDataSource
-from hummingbot.core.data_type.trade_fee import AddedToCostTradeFee, TokenAmount, TradeFeeBase
+from hummingbot.core.data_type.trade_fee import TokenAmount, TradeFeeBase
 from hummingbot.core.data_type.user_stream_tracker_data_source import UserStreamTrackerDataSource
 from hummingbot.core.utils.estimate_fee import build_trade_fee
 from hummingbot.core.web_assistant.connections.data_types import RESTMethod
 from hummingbot.core.web_assistant.web_assistants_factory import WebAssistantsFactory
-from hummingbot.logger import HummingbotLogger
+
+if TYPE_CHECKING:
+    from hummingbot.client.config.config_helpers import ClientConfigAdapter
 
 
 class PayeerExchange(ExchangePyBase):
@@ -69,7 +68,7 @@ class PayeerExchange(ExchangePyBase):
 
     @property
     def authenticator(self):
-        return PayeerAuth(self.payeer_api_key, self.payeer_secret_key)
+        return PayeerAuth(self.payeer_api_key, self.payeer_secret_key, time_provider=self._time_synchronizer)
 
     @property
     def name(self) -> str:
@@ -97,7 +96,7 @@ class PayeerExchange(ExchangePyBase):
 
     @property
     def check_network_request_path(self):
-        return CONSTANTS.SERVER_LIMIT_INFO
+        return CONSTANTS.INFO_PATH_URL
 
     @property
     def trading_pairs(self):
@@ -113,21 +112,6 @@ class PayeerExchange(ExchangePyBase):
 
     def supported_order_types(self):
         return [OrderType.LIMIT, OrderType.LIMIT_MAKER, OrderType.MARKET]
-
-    async def get_all_pairs_prices(self) -> Dict[str, Any]:
-        """
-        This method executes a request to the exchange to get the current price for all trades.
-        It returns the response of the exchange (expected to be used by the Payeer RateSource for the RateOracle)
-
-        :return: the response from the tickers endpoint
-        """
-        symbol_to_trading_pair_map = await self.trading_pair_symbol_map()
-        pairs_prices = await self._api_get(path_url=CONSTANTS.TICKER_PATH_URL)
-        spot_valid_token_entries = [
-            data_dict for data_dict in pairs_prices["data"] if data_dict["symbol"] in symbol_to_trading_pair_map
-        ]
-        pairs_prices["data"] = spot_valid_token_entries
-        return pairs_prices
 
     def _is_request_exception_related_to_time_synchronizer(self, request_exception: Exception):
         # API documentation does not clarify the error message for timestamp related problems
@@ -146,11 +130,6 @@ class PayeerExchange(ExchangePyBase):
         # ExchangePyBase class. Also fix the unit test test_cancel_order_not_found_in_the_exchange when replacing the
         # dummy implementation
         return False
-
-    async def _api_request_url(self, path_url: str, is_auth_required: bool = False) -> str:
-        url = await super()._api_request_url(path_url, is_auth_required)
-
-        return url
 
     def _create_web_assistants_factory(self) -> WebAssistantsFactory:
         return web_utils.build_api_factory(throttler=self._throttler, auth=self._auth)
@@ -179,33 +158,27 @@ class PayeerExchange(ExchangePyBase):
         amount: Decimal,
         price: Decimal = s_decimal_NaN,
         is_maker: Optional[bool] = None,
-    ) -> AddedToCostTradeFee:
+    ) -> TradeFeeBase:
 
         is_maker = is_maker or (order_type is OrderType.LIMIT_MAKER)
-        trading_pair = combine_to_hb_trading_pair(base=base_currency, quote=quote_currency)
-        if trading_pair in self._trading_fees:
-            fees_data = self._trading_fees[trading_pair]
-            fee_value = Decimal(fees_data["maker"]) if is_maker else Decimal(fees_data["taker"])
-            fee = AddedToCostTradeFee(percent=fee_value)
-        else:
-            fee = build_trade_fee(
-                self.name,
-                is_maker,
-                base_currency=base_currency,
-                quote_currency=quote_currency,
-                order_type=order_type,
-                order_side=order_side,
-                amount=amount,
-                price=price,
-            )
+        fee = build_trade_fee(
+            self.name,
+            is_maker,
+            base_currency=base_currency,
+            quote_currency=quote_currency,
+            order_type=order_type,
+            order_side=order_side,
+            amount=amount,
+            price=price,
+        )
         return fee
 
     def _initialize_trading_pair_symbols_from_exchange_info(self, exchange_info: Dict[str, Any]):
         mapping = bidict()
-        for symbol_data in filter(utils.is_pair_information_valid, exchange_info.get("data", [])):
-            if len(symbol_data["symbol"].split("/")) == 2:
-                base, quote = symbol_data["symbol"].split("/")
-                mapping[symbol_data["symbol"]] = combine_to_hb_trading_pair(base, quote)
+        for ticker in filter(utils.is_pair_information_valid, exchange_info.get("pairs", [])):
+            if len(ticker.split("_")) == 2:
+                base, quote = ticker.split("_")
+                mapping[ticker] = combine_to_hb_trading_pair(base, quote)
         self._set_trading_pair_symbol_map(mapping)
 
     async def _place_order(
@@ -245,8 +218,8 @@ class PayeerExchange(ExchangePyBase):
         if exchange_order.get("code") == 0:
             return (
                 str(exchange_order["data"]["info"]["orderId"]),
-                int(exchange_order["data"]["info"].get("timestamp") or exchange_order["data"]["info"]
-                    ["lastExecTime"]) * 1e-3,
+                int(exchange_order["data"]["info"].get("timestamp") or exchange_order["data"]["info"]["lastExecTime"])
+                * 1e-3,
             )
         else:
             raise IOError(str(exchange_order))
@@ -375,14 +348,17 @@ class PayeerExchange(ExchangePyBase):
     async def _update_balances(self):
         local_asset_names = set(self._account_balances.keys())
         remote_asset_names = set()
+        data = {
+            "ts": utils.get_ms_timestamp(),
+        }
 
-        response = await self._api_get(path_url=CONSTANTS.BALANCE_PATH_URL, is_auth_required=True)
+        response = await self._api_get(path_url=CONSTANTS.BALANCE_PATH_URL, data=data, is_auth_required=True)
 
-        if response.get("code") == 0:
-            for balance_entry in response["data"]:
-                asset_name = balance_entry["asset"]
-                self._account_available_balances[asset_name] = Decimal(balance_entry["availableBalance"])
-                self._account_balances[asset_name] = Decimal(balance_entry["totalBalance"])
+        if response.get("success"):
+            for asset_name in response["balances"]:
+                balance_entry = response["balances"][asset_name]
+                self._account_available_balances[asset_name] = Decimal(balance_entry["available"])
+                self._account_balances[asset_name] = Decimal(balance_entry["total"])
                 remote_asset_names.add(asset_name)
 
             asset_names_to_remove = local_asset_names.difference(remote_asset_names)
@@ -393,45 +369,67 @@ class PayeerExchange(ExchangePyBase):
             self.logger().error(f"There was an error during the balance request to Payeer ({response})")
             raise IOError(f"Error requesting balances from Payeer ({response})")
 
-    async def _format_trading_rules(self, raw_trading_pair_info: Dict[str, Any]) -> List[TradingRule]:
+    async def _format_trading_rules(self, exchange_info: Dict[str, Any]) -> List[TradingRule]:
         trading_rules = []
 
-        for info in filter(utils.is_pair_information_valid, raw_trading_pair_info.get("data", [])):
+        for symbol in filter(utils.is_pair_information_valid, exchange_info.get("pairs", [])):
             try:
-                trading_pair = await self.trading_pair_associated_to_exchange_symbol(symbol=info.get("symbol"))
+                pair_info = exchange_info["pairs"][symbol]
+                trading_pair = await self.trading_pair_associated_to_exchange_symbol(symbol=symbol)
                 trading_rules.append(
                     TradingRule(
                         trading_pair=trading_pair,
-                        min_order_size=Decimal(info["minQty"]),
-                        max_order_size=Decimal(info["maxQty"]),
-                        min_price_increment=Decimal(info["tickSize"]),
-                        min_base_amount_increment=Decimal(info["lotSize"]),
-                        min_notional_size=Decimal(info["minNotional"]),
+                        min_order_size=Decimal(pair_info["min_amount"]),
+                        min_price_increment=Decimal(pair_info["min_value"]),
+                        min_base_amount_increment=Decimal(pair_info["min_amount"]),
+                        min_notional_size=Decimal(pair_info["min_amount"]),
                     )
                 )
             except Exception:
-                self.logger().exception(f"Error parsing the trading pair rule {info}. Skipping.", exc_info=True)
+                self.logger().exception(f"Error parsing the trading pair rule {symbol}. Skipping.", exc_info=True)
         return trading_rules
 
     async def _update_trading_fees(self):
-        resp = await self._api_get(
-            path_url=CONSTANTS.FEE_PATH_URL,
-            is_auth_required=True,
-        )
-        fees_json = resp.get("data", {}).get("fees", [])
-        for fee_json in fees_json:
-            try:
-                trading_pair = await self.trading_pair_associated_to_exchange_symbol(symbol=fee_json["symbol"])
-                self._trading_fees[trading_pair] = fee_json["fee"]
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                pass
+        """
+        Update fees information from the exchange
+        """
+        pass
+
+    async def _request_order_fills(self, order: InFlightOrder) -> Dict[str, Any]:
+        data = {
+            "order_id": await order.get_exchange_order_id(),
+            "ts": utils.get_ms_timestamp(),
+        }
+        return await self._api_post(path_url=CONSTANTS.ORDER_STATUS_PATH_URL, data=data, is_auth_required=True)
 
     async def _all_trade_updates_for_order(self, order: InFlightOrder) -> List[TradeUpdate]:
-        # Payeer does not have an endpoint to retrieve trades for a particular order
-        # Thus it overrides the _update_orders_fills method
-        pass
+        trade_updates = []
+
+        if order.exchange_order_id is not None:
+            all_fills_response = await self._request_order_fills(order=order)
+            fills_data = all_fills_response["order"]["trades"]
+
+            for fill_data in fills_data:
+                fee = TradeFeeBase.new_spot_fee(
+                    fee_schema=self.trade_fee_schema(),
+                    trade_type=order.trade_type,
+                    percent_token=fill_data["feeCcy"],
+                    flat_fees=[TokenAmount(amount=Decimal(fill_data["fee"]), token=fill_data["feeCcy"])],
+                )
+                trade_update = TradeUpdate(
+                    trade_id=str(fill_data["tradeId"]),
+                    client_order_id=order.client_order_id,
+                    exchange_order_id=str(fill_data["ordId"]),
+                    trading_pair=order.trading_pair,
+                    fee=fee,
+                    fill_base_amount=Decimal(fill_data["fillSz"]),
+                    fill_quote_amount=Decimal(fill_data["fillSz"]) * Decimal(fill_data["fillPx"]),
+                    fill_price=Decimal(fill_data["fillPx"]),
+                    fill_timestamp=int(fill_data["ts"]) * 1e-3,
+                )
+                trade_updates.append(trade_update)
+
+        return trade_updates
 
     def _trade_update_from_fill_data(self, fill_data: Dict[str, Any], order: InFlightOrder) -> TradeUpdate:
         trade_id = str(fill_data["sn"])

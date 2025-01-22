@@ -1,10 +1,9 @@
-import time
 from typing import Any, Dict, Optional
 
 from hummingbot.connector.exchange.payeer import payeer_constants as CONSTANTS
 from hummingbot.core.api_throttler.async_throttler import AsyncThrottler
 from hummingbot.core.web_assistant.auth import AuthBase
-from hummingbot.core.web_assistant.connections.data_types import RESTRequest
+from hummingbot.core.web_assistant.connections.data_types import RESTMethod, RESTRequest
 from hummingbot.core.web_assistant.rest_pre_processors import RESTPreProcessorBase
 from hummingbot.core.web_assistant.web_assistants_factory import WebAssistantsFactory
 
@@ -73,4 +72,12 @@ async def get_current_server_time(
     throttler: Optional[AsyncThrottler] = None,
     domain: str = CONSTANTS.DEFAULT_DOMAIN,
 ) -> int:
-    return int(time.time() * 1e3)
+    throttler = throttler or create_throttler()
+    api_factory = build_api_factory(throttler=throttler)
+    rest_assistant = await api_factory.get_rest_assistant()
+    response = await rest_assistant.execute_request(
+        url=public_rest_url(path_url=CONSTANTS.INFO_PATH_URL, domain=domain),
+        method=RESTMethod.GET,
+    )
+    server_time = response["time"]
+    return server_time

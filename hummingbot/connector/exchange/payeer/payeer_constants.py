@@ -10,8 +10,6 @@ HBOT_ORDER_ID_PREFIX = "HMBot"
 EXCHANGE_NAME = "payeer"
 PUBLIC_REST_URL = "https://payeer.com/api/trade/"
 PRIVATE_REST_URL = "https://payeer.com/api/trade/"
-WS_URL = "wss://payeer.com/api/trade/ws"
-PRIVATE_WS_URL = "wss://payeer.com/api/trade/ws"
 
 # REST API ENDPOINTS
 ORDER_PATH_URL = "order_create"
@@ -22,20 +20,11 @@ TICKER_PATH_URL = "ticker"
 PRODUCTS_PATH_URL = "info"
 TRADES_PATH_URL = "trades"
 DEPTH_PATH_URL = "depth"
-INFO_PATH_URL = "info"
+INFO_PATH_URL = "time"
 STREAM_PATH_URL = "stream"
 
-SERVER_LIMIT_INFO = "risk-limit-info"
-
 # WS API ENDPOINTS
-SUB_ENDPOINT_NAME = "sub"
-PONG_ENDPOINT_NAME = "pong"
-TRADE_TOPIC_ID = "trades"
-DIFF_TOPIC_ID = "depth"
-PING_TOPIC_ID = "ping"
-ACCOUNT_TYPE = "CASH"
-BALANCE_EVENT_TYPE = "balance"
-ORDER_CHANGE_EVENT_TYPE = "order"
+# not used in Payeer
 
 # OrderStates
 
@@ -91,17 +80,5 @@ RATE_LIMITS = [
     ),
     RateLimit(
         limit_id=INFO_PATH_URL, limit=100, time_interval=1, linked_limits=[LinkedLimitWeightPair(ALL_ENDPOINTS_LIMIT)]
-    ),
-    RateLimit(
-        limit_id=SUB_ENDPOINT_NAME,
-        limit=100,
-        time_interval=1,
-        linked_limits=[LinkedLimitWeightPair(ALL_ENDPOINTS_LIMIT)],
-    ),
-    RateLimit(
-        limit_id=PONG_ENDPOINT_NAME,
-        limit=100,
-        time_interval=1,
-        linked_limits=[LinkedLimitWeightPair(ALL_ENDPOINTS_LIMIT)],
     ),
 ]

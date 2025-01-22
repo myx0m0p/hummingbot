@@ -1,6 +1,6 @@
 import asyncio
 from decimal import Decimal
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from hummingbot.connector.exchange.payeer import payeer_constants as CONSTANTS, payeer_web_utils as web_utils
 from hummingbot.core.data_type.order_book_message import OrderBookMessage, OrderBookMessageType
@@ -8,6 +8,9 @@ from hummingbot.core.data_type.order_book_tracker_data_source import OrderBookTr
 from hummingbot.core.web_assistant.connections.data_types import RESTMethod
 from hummingbot.core.web_assistant.web_assistants_factory import WebAssistantsFactory
 from hummingbot.logger import HummingbotLogger
+
+if TYPE_CHECKING:
+    from hummingbot.connector.exchange.payeer.payeer_exchange import PayeerExchange
 
 
 class PayeerAPIOrderBookDataSource(OrderBookTrackerDataSource):

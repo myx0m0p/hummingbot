@@ -1,5 +1,5 @@
 import asyncio
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from hummingbot.connector.exchange.payeer import payeer_constants as CONSTANTS
 from hummingbot.connector.exchange.payeer.payeer_auth import PayeerAuth
@@ -7,6 +7,9 @@ from hummingbot.core.data_type.user_stream_tracker_data_source import UserStream
 from hummingbot.core.web_assistant.connections.data_types import RESTMethod
 from hummingbot.core.web_assistant.web_assistants_factory import WebAssistantsFactory
 from hummingbot.logger import HummingbotLogger
+
+if TYPE_CHECKING:
+    from hummingbot.connector.exchange.payeer.payeer_exchange import PayeerExchange
 
 
 class PayeerAPIUserStreamDataSource(UserStreamTrackerDataSource):
